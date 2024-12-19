@@ -1,0 +1,6 @@
+[submodule "backend-api"]
+	path = backend-api
+	url = git@github.com:DevOpsProjectFinal/backend-api.git
+[submodule "frontend-ui"]
+	path = frontend-ui
+	url = git@github.com:DevOpsProjectFinal/frontend-ui.git
