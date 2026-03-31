@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 const region = process.env.AWS_REGION || "us-east-2";
 const bedrockRegion = process.env.BEDROCK_REGION || "us-east-1";
-const modelId = "meta.llama3-8b-instruct-v1:0";
+const modelId = "amazon.nova-micro-v1:0";
 
 async function getBedrockClient() {
   // Try Secrets Manager first for production; fall back to env vars
@@ -73,9 +73,9 @@ Keep responses concise and helpful. If asked about a specific route or date, ref
     const client = await getBedrockClient();
 
     const payload = {
-      prompt: `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n${systemPrompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n${message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>`,
-      max_gen_len: 256,
-      temperature: 0.7,
+      system: [{ text: systemPrompt }],
+      messages: [{ role: "user", content: [{ text: message }] }],
+      inferenceConfig: { maxTokens: 256, temperature: 0.7 },
     };
 
     const command = new InvokeModelCommand({
@@ -87,7 +87,7 @@ Keep responses concise and helpful. If asked about a specific route or date, ref
 
     const response = await client.send(command);
     const result = JSON.parse(new TextDecoder().decode(response.body));
-    const reply = result.generation?.trim() ?? "Sorry, I couldn't generate a response.";
+    const reply = result.output?.message?.content?.[0]?.text?.trim() ?? "Sorry, I couldn't generate a response.";
 
     return NextResponse.json({ reply });
   } catch (err: unknown) {

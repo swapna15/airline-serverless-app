@@ -58,7 +58,7 @@ export default function ChatWidget() {
             <span className="text-white text-lg">✈</span>
             <div>
               <p className="text-white font-semibold text-sm">AirApp Assistant</p>
-              <p className="text-blue-200 text-xs">Powered by AWS Bedrock</p>
+              <p className="text-blue-200 text-xs">Powered by Amazon Nova</p>
             </div>
           </div>
 
