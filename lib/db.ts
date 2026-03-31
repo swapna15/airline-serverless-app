@@ -127,8 +127,8 @@ async function seedIfNeeded() {
 }
 
 function normalizeFlight(record: FlightRecord): Flight {
-  const flight = { ...record };
-  delete flight.route;
+  const { route: _route, ...flight } = record;
+  void _route;
   return flight;
 }
 

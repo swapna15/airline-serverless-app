@@ -3,39 +3,9 @@ import { Booking, Flight, Seat, SeatStatus } from "@/lib/types";
 const rowLabels = ["A", "B", "C", "D", "E", "F"];
 
 const initialFlights: Flight[] = [
-  {
-    id: "FL-1001",
-    from: "ORD",
-    to: "JFK",
-    date: "2026-04-10",
-    departureTime: "08:30",
-    arrivalTime: "11:20",
-    price: 220,
-    totalSeats: 24,
-    availableSeats: 24,
-  },
-  {
-    id: "FL-1002",
-    from: "SFO",
-    to: "LAX",
-    date: "2026-04-10",
-    departureTime: "09:00",
-    arrivalTime: "10:35",
-    price: 140,
-    totalSeats: 24,
-    availableSeats: 24,
-  },
-  {
-    id: "FL-1003",
-    from: "SEA",
-    to: "DEN",
-    date: "2026-04-11",
-    departureTime: "14:15",
-    arrivalTime: "17:05",
-    price: 180,
-    totalSeats: 24,
-    availableSeats: 24,
-  },
+  { id: "FL-1001", from: "ORD", to: "JFK", date: "2026-04-10", departureTime: "08:30", arrivalTime: "11:20", price: 220, totalSeats: 24, availableSeats: 24 },
+  { id: "FL-1002", from: "SFO", to: "LAX", date: "2026-04-10", departureTime: "09:00", arrivalTime: "10:35", price: 140, totalSeats: 24, availableSeats: 24 },
+  { id: "FL-1003", from: "SEA", to: "DEN", date: "2026-04-11", departureTime: "14:15", arrivalTime: "17:05", price: 180, totalSeats: 24, availableSeats: 24 },
 ];
 
 const flights = new Map<string, Flight>(initialFlights.map((f) => [f.id, f]));
@@ -47,9 +17,7 @@ function createSeatMap(seatsCount: number): Seat[] {
   const rows = Math.ceil(seatsCount / rowLabels.length);
   for (let row = 1; row <= rows; row += 1) {
     for (const label of rowLabels) {
-      if (seatMap.length >= seatsCount) {
-        break;
-      }
+      if (seatMap.length >= seatsCount) break;
       seatMap.push({ seatNumber: `${row}${label}`, status: "available" });
     }
   }
@@ -66,15 +34,9 @@ function randomId(prefix: string): string {
 
 export function getFlights(filters?: { from?: string; to?: string; date?: string }): Flight[] {
   return Array.from(flights.values()).filter((flight) => {
-    if (filters?.from && flight.from !== filters.from.toUpperCase()) {
-      return false;
-    }
-    if (filters?.to && flight.to !== filters.to.toUpperCase()) {
-      return false;
-    }
-    if (filters?.date && flight.date !== filters.date) {
-      return false;
-    }
+    if (filters?.from && flight.from !== filters.from.toUpperCase()) return false;
+    if (filters?.to && flight.to !== filters.to.toUpperCase()) return false;
+    if (filters?.date && flight.date !== filters.date) return false;
     return true;
   });
 }
@@ -87,23 +49,13 @@ export function getSeatsByFlightId(flightId: string): Seat[] | undefined {
   return seatMaps.get(flightId);
 }
 
-export function updateSeatStatus(
-  flightId: string,
-  seatNumber: string,
-  status: SeatStatus
-): Seat | undefined {
+export function updateSeatStatus(flightId: string, seatNumber: string, status: SeatStatus): Seat | undefined {
   const seats = seatMaps.get(flightId);
-  if (!seats) {
-    return undefined;
-  }
+  if (!seats) return undefined;
   const seat = seats.find((item) => item.seatNumber === seatNumber);
-  if (!seat) {
-    return undefined;
-  }
+  if (!seat) return undefined;
   seat.status = status;
-  if (status !== "reserved") {
-    seat.bookingId = undefined;
-  }
+  if (status !== "reserved") seat.bookingId = undefined;
   return seat;
 }
 
@@ -115,20 +67,11 @@ export function createBooking(data: {
 }): { booking?: Booking; message?: string } {
   const flight = flights.get(data.flightId);
   const seats = seatMaps.get(data.flightId);
-  if (!flight || !seats) {
-    return { message: "Flight not found." };
-  }
-
+  if (!flight || !seats) return { message: "Flight not found." };
   const seat = seats.find((item) => item.seatNumber === data.seatNumber);
-  if (!seat) {
-    return { message: "Seat not found." };
-  }
-  if (seat.status !== "available") {
-    return { message: "Seat is not available." };
-  }
-  if (flight.availableSeats <= 0) {
-    return { message: "No seats left on this flight." };
-  }
+  if (!seat) return { message: "Seat not found." };
+  if (seat.status !== "available") return { message: "Seat is not available." };
+  if (flight.availableSeats <= 0) return { message: "No seats left on this flight." };
 
   const booking: Booking = {
     id: randomId("BK"),
@@ -138,6 +81,8 @@ export function createBooking(data: {
     seatNumber: data.seatNumber,
     status: "confirmed",
     createdAt: new Date().toISOString(),
+    userId: "guest",
+    passengers: [{ seatNumber: data.seatNumber, passengerName: data.passengerName.trim(), passengerEmail: data.passengerEmail.trim().toLowerCase() }],
   };
 
   seat.status = "reserved";
@@ -153,8 +98,6 @@ export function getBookingById(bookingId: string): Booking | undefined {
 
 export function upsertFlight(data: Flight): Flight {
   flights.set(data.id, data);
-  if (!seatMaps.has(data.id)) {
-    seatMaps.set(data.id, createSeatMap(data.totalSeats));
-  }
+  if (!seatMaps.has(data.id)) seatMaps.set(data.id, createSeatMap(data.totalSeats));
   return data;
 }
