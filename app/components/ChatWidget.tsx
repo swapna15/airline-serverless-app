@@ -67,7 +67,7 @@ export default function ChatWidget() {
             <span className="text-white text-lg">✈</span>
             <div>
               <p className="text-white font-semibold text-sm">AirApp Assistant</p>
-              <p className="text-blue-200 text-xs">Powered by Amazon Nova · Can search & book flights</p>
+              <p className="text-blue-200 text-xs">Powered by Claude Sonnet · Can search & book flights</p>
             </div>
           </div>
 
