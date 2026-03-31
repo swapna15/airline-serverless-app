@@ -4,7 +4,7 @@ const { DynamoDBDocumentClient, ScanCommand } = require("@aws-sdk/lib-dynamodb")
 
 const region = process.env.AWS_REGION || "us-east-2";
 const flightsTable = process.env.FLIGHTS_TABLE || "airline-flights";
-const modelId = "amazon.titan-text-premier-v1:0";
+const modelId = "meta.llama3-8b-instruct-v1:0";
 
 const bedrockClient = new BedrockRuntimeClient({ region });
 const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region }));
@@ -35,8 +35,9 @@ exports.handler = async (event) => {
     }
 
     const payload = {
-      inputText: `You are AirApp's flight assistant. Current flights:\n${flightContext}\n\nUser: ${message}\n\nAssistant:`,
-      textGenerationConfig: { maxTokenCount: 512, temperature: 0.7 },
+      prompt: `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\nYou are AirApp's flight assistant. Current flights:\n${flightContext}<|eot_id|><|start_header_id|>user<|end_header_id|>\n${message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>`,
+      max_gen_len: 512,
+      temperature: 0.7,
     };
 
     const cmd = new InvokeModelCommand({
@@ -48,7 +49,7 @@ exports.handler = async (event) => {
 
     const res = await bedrockClient.send(cmd);
     const result = JSON.parse(new TextDecoder().decode(res.body));
-    const reply = result.results?.[0]?.outputText?.trim() ?? "Sorry, I couldn't generate a response.";
+    const reply = result.generation?.trim() ?? "Sorry, I couldn't generate a response.";
 
     return response(200, { reply });
   } catch (err) {
