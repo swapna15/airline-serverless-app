@@ -4,7 +4,7 @@ const { DynamoDBDocumentClient, ScanCommand } = require("@aws-sdk/lib-dynamodb")
 
 const region = process.env.AWS_REGION || "us-east-2";
 const flightsTable = process.env.FLIGHTS_TABLE || "airline-flights";
-const modelId = "amazon.titan-text-express-v1";
+const modelId = "amazon.titan-text-premier-v1:0";
 
 const bedrockClient = new BedrockRuntimeClient({ region });
 const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region }));

@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 const region = process.env.AWS_REGION || "us-east-2";
 const bedrockRegion = process.env.BEDROCK_REGION || "us-east-1";
-const modelId = "amazon.titan-text-express-v1";
+const modelId = "amazon.titan-text-premier-v1:0";
 
 async function getBedrockClient() {
   // Try Secrets Manager first for production; fall back to env vars
