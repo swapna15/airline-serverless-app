@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
+import ChatWidget from "./components/ChatWidget";
 import { auth } from "@/auth";
 
 const geistSans = Geist({
@@ -34,6 +35,7 @@ export default async function RootLayout({
       <body className="min-h-full flex flex-col bg-gray-50">
         <Navbar user={session?.user ?? null} />
         <div className="flex-1">{children}</div>
+        <ChatWidget />
       </body>
     </html>
   );

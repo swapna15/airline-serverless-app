@@ -528,3 +528,85 @@ resource "aws_lambda_permission" "allow_apigw_manage_flight" {
 output "api_gateway_url" {
   value = aws_apigatewayv2_api.airline_http_api.api_endpoint
 }
+
+# ── Bedrock Flight Assistant ─────────────────────────────────────────────────
+
+resource "aws_secretsmanager_secret" "bedrock_config" {
+  name        = "airline/bedrock-config"
+  description = "AWS credentials and config for Bedrock inference"
+}
+
+resource "aws_iam_role_policy" "lambda_bedrock" {
+  name = "airline-lambda-bedrock-access"
+  role = aws_iam_role.lambda_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock:InvokeModel"]
+        Resource = "arn:aws:bedrock:${var.bedrock_region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = aws_secretsmanager_secret.bedrock_config.arn
+      }
+    ]
+  })
+}
+
+variable "bedrock_region" {
+  description = "AWS region where Bedrock is available"
+  type        = string
+  default     = "us-east-1"
+}
+
+data "archive_file" "flight_assistant_zip" {
+  type        = "zip"
+  source_dir  = "../../lambdas/flightassistant"
+  output_path = "${path.module}/flightassistant.zip"
+}
+
+resource "aws_lambda_function" "flight_assistant" {
+  function_name    = "airline-flight-assistant"
+  filename         = data.archive_file.flight_assistant_zip.output_path
+  source_code_hash = data.archive_file.flight_assistant_zip.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "index.handler"
+  runtime          = "nodejs18.x"
+  timeout          = 30
+
+  environment {
+    variables = {
+      FLIGHTS_TABLE       = aws_dynamodb_table.flights.name
+      AWS_REGION_BEDROCK  = var.bedrock_region
+    }
+  }
+}
+
+resource "aws_apigatewayv2_integration" "flight_assistant" {
+  api_id                 = aws_apigatewayv2_api.airline_http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.flight_assistant.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "flight_assistant" {
+  api_id    = aws_apigatewayv2_api.airline_http_api.id
+  route_key = "POST /api/chat"
+  target    = "integrations/${aws_apigatewayv2_integration.flight_assistant.id}"
+}
+
+resource "aws_lambda_permission" "allow_apigw_flight_assistant" {
+  statement_id  = "AllowExecutionFromAPIGatewayFlightAssistant"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.flight_assistant.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.airline_http_api.execution_arn}/*/*"
+}
+
+output "flight_assistant_function_name" {
+  value = aws_lambda_function.flight_assistant.function_name
+}

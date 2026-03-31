@@ -9,7 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1021.0",
     "@aws-sdk/client-dynamodb": "^3.1020.0",
+    "@aws-sdk/client-secrets-manager": "^3.1021.0",
     "@aws-sdk/lib-dynamodb": "^3.1020.0",
     "@types/bcryptjs": "^2.4.6",
     "axios": "^1.14.0",
