@@ -1,7 +1,6 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
-import { getUserByEmail } from "@/lib/db";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -13,6 +12,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
         try {
+          // Lazy import to avoid DynamoDB client init at build time
+          const { getUserByEmail } = await import("@/lib/db");
           const user = await getUserByEmail(credentials.email as string);
           if (!user) return null;
           const valid = await bcrypt.compare(credentials.password as string, user.passwordHash);
