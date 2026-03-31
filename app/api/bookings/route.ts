@@ -3,6 +3,8 @@ import { createBooking } from "@/lib/db";
 import { isValidEmail, isValidName } from "@/lib/validation";
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
