@@ -546,7 +546,7 @@ resource "aws_iam_role_policy" "lambda_bedrock" {
       {
         Effect   = "Allow"
         Action   = ["bedrock:InvokeModel"]
-        Resource = "arn:aws:bedrock:${var.bedrock_region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+        Resource = "arn:aws:bedrock:${var.bedrock_region}::foundation-model/amazon.titan-text-express-v1"
       },
       {
         Effect   = "Allow"

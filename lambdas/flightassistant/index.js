@@ -4,7 +4,7 @@ const { DynamoDBDocumentClient, ScanCommand } = require("@aws-sdk/lib-dynamodb")
 
 const region = process.env.AWS_REGION || "us-east-2";
 const flightsTable = process.env.FLIGHTS_TABLE || "airline-flights";
-const modelId = "anthropic.claude-3-haiku-20240307-v1:0";
+const modelId = "amazon.titan-text-express-v1";
 
 const bedrockClient = new BedrockRuntimeClient({ region });
 const ddbClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region }));
@@ -35,10 +35,8 @@ exports.handler = async (event) => {
     }
 
     const payload = {
-      anthropic_version: "bedrock-2023-05-31",
-      max_tokens: 512,
-      system: `You are AirApp's flight assistant. Current flights:\n${flightContext}`,
-      messages: [{ role: "user", content: message }],
+      inputText: `You are AirApp's flight assistant. Current flights:\n${flightContext}\n\nUser: ${message}\n\nAssistant:`,
+      textGenerationConfig: { maxTokenCount: 512, temperature: 0.7 },
     };
 
     const cmd = new InvokeModelCommand({
@@ -50,7 +48,7 @@ exports.handler = async (event) => {
 
     const res = await bedrockClient.send(cmd);
     const result = JSON.parse(new TextDecoder().decode(res.body));
-    const reply = result.content?.[0]?.text ?? "Sorry, I couldn't generate a response.";
+    const reply = result.results?.[0]?.outputText?.trim() ?? "Sorry, I couldn't generate a response.";
 
     return response(200, { reply });
   } catch (err) {
