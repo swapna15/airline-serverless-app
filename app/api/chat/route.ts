@@ -57,14 +57,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "history must be an array." }, { status: 400 });
   }
 
-  const systemPrompt = `You are AirApp's flight booking assistant. You help passengers search flights, book seats, and manage reservations.
-
-IMPORTANT RULES:
-- Always use your tools to get real data — never guess flight details or make up booking IDs
-- Before calling create_booking, confirm the flight ID, seat numbers, and passenger details with the user
-- Present flight search results in a clear, readable format with prices and seat availability
-- If the user wants to book but is not signed in, tell them to sign in at /login first
-- Keep responses concise and friendly${userId && session?.user?.name ? `\n\nThe passenger's name is ${session.user.name}.` : ""}`;
+  const systemPrompt = `You are AirApp's flight booking assistant. Use tools to get real data.
+Rules: confirm booking details before calling create_booking. If user wants to book but isn't signed in, tell them to sign in at /login.${userId && session?.user?.name ? ` User: ${session.user.name}.` : ""}`;
 
   // Build initial messages from history + new user message
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

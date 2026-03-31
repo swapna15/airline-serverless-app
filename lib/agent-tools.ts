@@ -26,13 +26,13 @@ export type AgentTool = {
 export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "search_flights",
-    description: "Search for available flights. Optionally filter by origin airport (from), destination airport (to), and date.",
+    description: "Search available flights. Filter by from, to, date.",
     inputSchema: {
       type: "object",
       properties: {
-        from: { type: "string", description: "Origin airport IATA code (e.g. ORD)" },
-        to: { type: "string", description: "Destination airport IATA code (e.g. JFK)" },
-        date: { type: "string", description: "Travel date in YYYY-MM-DD format" },
+        from: { type: "string", description: "Origin IATA code e.g. ORD" },
+        to: { type: "string", description: "Destination IATA code e.g. JFK" },
+        date: { type: "string", description: "Date YYYY-MM-DD" },
       },
     },
     async execute(args) {
@@ -51,11 +51,11 @@ export const AGENT_TOOLS: AgentTool[] = [
 
   {
     name: "get_flight_seats",
-    description: "Get the seat map for a specific flight, showing which seats are available, reserved, or blocked.",
+    description: "Get seat map for a flight.",
     inputSchema: {
       type: "object",
       properties: {
-        flightId: { type: "string", description: "The flight ID (e.g. FL-1001)" },
+        flightId: { type: "string", description: "Flight ID e.g. FL-1001" },
       },
       required: ["flightId"],
     },
@@ -73,20 +73,19 @@ export const AGENT_TOOLS: AgentTool[] = [
 
   {
     name: "create_booking",
-    description: "Create a booking for one or more seats on a flight. Requires the user to be signed in.",
+    description: "Book seats on a flight. User must be signed in.",
     inputSchema: {
       type: "object",
       properties: {
-        flightId: { type: "string", description: "The flight ID to book" },
+        flightId: { type: "string" },
         passengers: {
           type: "array",
-          description: "List of passengers, one per seat",
           items: {
             type: "object",
             properties: {
-              seatNumber: { type: "string", description: "Seat number (e.g. 1A)" },
-              passengerName: { type: "string", description: "Full name of the passenger" },
-              passengerEmail: { type: "string", description: "Email address of the passenger" },
+              seatNumber: { type: "string" },
+              passengerName: { type: "string" },
+              passengerEmail: { type: "string" },
             },
             required: ["seatNumber", "passengerName", "passengerEmail"],
           },
@@ -114,12 +113,10 @@ export const AGENT_TOOLS: AgentTool[] = [
 
   {
     name: "get_booking",
-    description: "Retrieve the details of a booking by its Booking ID.",
+    description: "Get booking details by ID.",
     inputSchema: {
       type: "object",
-      properties: {
-        bookingId: { type: "string", description: "The booking ID (e.g. BK-A1B2C3D4)" },
-      },
+      properties: { bookingId: { type: "string" } },
       required: ["bookingId"],
     },
     async execute(args) {
@@ -135,11 +132,8 @@ export const AGENT_TOOLS: AgentTool[] = [
 
   {
     name: "get_my_bookings",
-    description: "Get all bookings for the currently signed-in user.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-    },
+    description: "Get all bookings for the signed-in user.",
+    inputSchema: { type: "object", properties: {} },
     async execute(_args, context) {
       if (!context.userId) {
         return { error: "You must be signed in to view your bookings." };
@@ -155,12 +149,10 @@ export const AGENT_TOOLS: AgentTool[] = [
 
   {
     name: "cancel_flight",
-    description: "Cancel a flight by its Flight ID. This will block all seats and cancel all confirmed bookings on that flight.",
+    description: "Cancel a flight and all its bookings.",
     inputSchema: {
       type: "object",
-      properties: {
-        flightId: { type: "string", description: "The flight ID to cancel (e.g. FL-1001)" },
-      },
+      properties: { flightId: { type: "string" } },
       required: ["flightId"],
     },
     async execute(args) {
