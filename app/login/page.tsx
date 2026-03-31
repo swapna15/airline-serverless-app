@@ -2,10 +2,11 @@
 
 import { signInAction } from "@/app/actions/auth";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 
 function LoginForm() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") ?? "/";
   const [email, setEmail] = useState("");
@@ -19,12 +20,18 @@ function LoginForm() {
     setError("");
     try {
       await signInAction(email, password, callbackUrl);
-      // signInAction redirects on success — if we reach here it succeeded
     } catch (err: unknown) {
+      // NextAuth v5 throws a redirect on success — detect and handle it
       const msg = String(err);
-      // NextAuth throws a redirect "error" on success — that's fine
-      if (msg.includes("NEXT_REDIRECT") || msg.includes("redirect")) {
-        return; // successful redirect, do nothing
+      if (
+        msg.includes("NEXT_REDIRECT") ||
+        msg.includes("redirect") ||
+        (err as { digest?: string })?.digest?.startsWith("NEXT_REDIRECT")
+      ) {
+        // It's a successful redirect — navigate client-side
+        router.push(callbackUrl);
+        router.refresh();
+        return;
       }
       setError("Invalid email or password.");
     } finally {

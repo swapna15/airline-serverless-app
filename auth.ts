@@ -12,11 +12,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
         try {
-          // Lazy import to avoid DynamoDB client init at build time
           const { getUserByEmail } = await import("@/lib/db");
           const user = await getUserByEmail(credentials.email as string);
           if (!user) return null;
-          const valid = await bcrypt.compare(credentials.password as string, user.passwordHash);
+          const valid = await bcrypt.compare(
+            credentials.password as string,
+            user.passwordHash
+          );
           if (!valid) return null;
           return { id: user.id, name: user.name, email: user.email };
         } catch (err) {
@@ -27,9 +29,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   session: { strategy: "jwt" },
-  pages: {
-    signIn: "/login",
-  },
+  pages: { signIn: "/login" },
   callbacks: {
     async jwt({ token, user }) {
       if (user) token.id = user.id;
