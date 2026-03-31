@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const region = process.env.AWS_REGION || "us-east-2";
+const bedrockRegion = process.env.BEDROCK_REGION || "us-east-1";
 const modelId = "amazon.titan-text-express-v1";
 
 async function getBedrockClient() {
@@ -33,7 +34,7 @@ async function getBedrockClient() {
   } catch {
     // Fall through to default credentials
   }
-  return new BedrockRuntimeClient({ region });
+  return new BedrockRuntimeClient({ region: bedrockRegion });
 }
 
 export async function POST(request: NextRequest) {
