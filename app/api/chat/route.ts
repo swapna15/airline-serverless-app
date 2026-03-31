@@ -52,10 +52,10 @@ export async function POST(request: NextRequest) {
   try {
     const flights = await getFlights();
     flightContext = flights
-      .slice(0, 10)
+      .slice(0, 5)
       .map(
         (f) =>
-          `${f.id}: ${f.from}→${f.to} on ${f.date} dep ${f.departureTime} arr ${f.arrivalTime} $${f.price} (${f.availableSeats} seats left, status: ${f.status ?? "active"})`
+          `${f.id}: ${f.from}→${f.to} ${f.date} $${f.price} (${f.availableSeats} seats)`
       )
       .join("\n");
   } catch {
@@ -74,7 +74,7 @@ Keep responses concise and helpful. If asked about a specific route or date, ref
 
     const payload = {
       prompt: `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n${systemPrompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n${message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>`,
-      max_gen_len: 512,
+      max_gen_len: 256,
       temperature: 0.7,
     };
 
