@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const bedrockRegion = process.env.BEDROCK_REGION || "us-east-1";
-const modelId = "amazon.nova-micro-v1:0";
+const modelId = "us.amazon.nova-micro-v1:0";
 const MAX_ITERATIONS = 10;
 
 async function getBedrockClient() {
