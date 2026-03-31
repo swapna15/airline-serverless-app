@@ -1,95 +1,141 @@
 import { auth } from "@/auth";
-import { getFlights } from "@/lib/db";
+import { AGENT_TOOLS, executeTool } from "@/lib/agent-tools";
 import {
   BedrockRuntimeClient,
-  InvokeModelCommand,
+  ConverseCommand,
+  Tool,
 } from "@aws-sdk/client-bedrock-runtime";
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-const region = process.env.AWS_REGION || "us-east-2";
 const bedrockRegion = process.env.BEDROCK_REGION || "us-east-1";
 const modelId = "amazon.nova-micro-v1:0";
+const MAX_ITERATIONS = 10;
 
 async function getBedrockClient() {
-  // Try Secrets Manager first for production; fall back to env vars
   try {
     const secretName = process.env.BEDROCK_SECRET_NAME;
     if (secretName) {
       const { SecretsManagerClient, GetSecretValueCommand } = await import(
         "@aws-sdk/client-secrets-manager"
       );
-      const sm = new SecretsManagerClient({ region });
+      const sm = new SecretsManagerClient({ region: process.env.AWS_REGION || "us-east-2" });
       const secret = await sm.send(new GetSecretValueCommand({ SecretId: secretName }));
       const creds = JSON.parse(secret.SecretString ?? "{}");
       return new BedrockRuntimeClient({
-        region: creds.region ?? region,
-        credentials: {
-          accessKeyId: creds.accessKeyId,
-          secretAccessKey: creds.secretAccessKey,
-        },
+        region: creds.region ?? bedrockRegion,
+        credentials: { accessKeyId: creds.accessKeyId, secretAccessKey: creds.secretAccessKey },
       });
     }
-  } catch {
-    // Fall through to default credentials
-  }
+  } catch { /* fall through */ }
   return new BedrockRuntimeClient({ region: bedrockRegion });
 }
 
+// Build Bedrock toolConfig from AGENT_TOOLS
+const toolConfig = {
+  tools: AGENT_TOOLS.map((t) => ({
+    toolSpec: {
+      name: t.name,
+      description: t.description,
+      inputSchema: { json: t.inputSchema },
+    },
+  })) as Tool[],
+};
+
 export async function POST(request: NextRequest) {
   const session = await auth().catch(() => null);
+  const userId = session?.user?.id;
 
   const body = await request.json();
-  const { message } = body;
+  const { message, history } = body;
 
   if (!message || typeof message !== "string") {
     return NextResponse.json({ message: "message is required." }, { status: 400 });
   }
-
-  // Fetch current flights to give the AI context
-  let flightContext = "";
-  try {
-    const flights = await getFlights();
-    flightContext = flights
-      .slice(0, 5)
-      .map(
-        (f) =>
-          `${f.id}: ${f.from}→${f.to} ${f.date} $${f.price} (${f.availableSeats} seats)`
-      )
-      .join("\n");
-  } catch {
-    flightContext = "Flight data temporarily unavailable.";
+  if (history !== undefined && !Array.isArray(history)) {
+    return NextResponse.json({ message: "history must be an array." }, { status: 400 });
   }
 
-  const systemPrompt = `You are AirApp's friendly flight assistant. Help passengers find flights, understand booking, and answer travel questions.
+  const systemPrompt = `You are AirApp's flight booking assistant. You help passengers search flights, book seats, and manage reservations.
 
-Current available flights:
-${flightContext}
+IMPORTANT RULES:
+- Always use your tools to get real data — never guess flight details or make up booking IDs
+- Before calling create_booking, confirm the flight ID, seat numbers, and passenger details with the user
+- Present flight search results in a clear, readable format with prices and seat availability
+- If the user wants to book but is not signed in, tell them to sign in at /login first
+- Keep responses concise and friendly${userId && session?.user?.name ? `\n\nThe passenger's name is ${session.user.name}.` : ""}`;
 
-Keep responses concise and helpful. If asked about a specific route or date, refer to the flight data above.${session?.user ? ` The passenger's name is ${session.user.name}.` : ""}`;
+  // Build initial messages from history + new user message
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: any[] = [
+    ...(history ?? []).map((h: { role: string; content: string }) => ({
+      role: h.role,
+      content: [{ text: h.content }],
+    })),
+    { role: "user", content: [{ text: message }] },
+  ];
 
   try {
     const client = await getBedrockClient();
+    let iterations = 0;
+    let finalReply = "Sorry, I couldn't generate a response.";
 
-    const payload = {
-      system: [{ text: systemPrompt }],
-      messages: [{ role: "user", content: [{ text: message }] }],
-      inferenceConfig: { maxTokens: 256, temperature: 0.7 },
-    };
+    // Agentic loop
+    while (iterations < MAX_ITERATIONS) {
+      iterations++;
 
-    const command = new InvokeModelCommand({
-      modelId,
-      contentType: "application/json",
-      accept: "application/json",
-      body: JSON.stringify(payload),
-    });
+      const command = new ConverseCommand({
+        modelId,
+        system: [{ text: systemPrompt }],
+        messages,
+        toolConfig,
+        inferenceConfig: { maxTokens: 512, temperature: 0.7 },
+      });
 
-    const response = await client.send(command);
-    const result = JSON.parse(new TextDecoder().decode(response.body));
-    const reply = result.output?.message?.content?.[0]?.text?.trim() ?? "Sorry, I couldn't generate a response.";
+      const response = await client.send(command);
+      const assistantMessage = response.output?.message;
+      if (assistantMessage) messages.push(assistantMessage);
 
-    return NextResponse.json({ reply });
+      if (response.stopReason === "end_turn") {
+        // Extract text from the final response
+        const textBlock = assistantMessage?.content?.find((b: { text?: string }) => b.text);
+        finalReply = textBlock?.text?.trim() ?? finalReply;
+        break;
+      }
+
+      if (response.stopReason === "tool_use") {
+        // Execute all tool calls and collect results
+        const toolResultContents: unknown[] = [];
+
+        for (const block of assistantMessage?.content ?? []) {
+          const toolUse = (block as { toolUse?: { toolUseId: string; name: string; input: Record<string, unknown> } }).toolUse;
+          if (!toolUse) continue;
+
+          const result = await executeTool(toolUse.name, toolUse.input ?? {}, { userId });
+          const hasError = typeof result === "object" && result !== null && "error" in result;
+
+          toolResultContents.push({
+            toolResult: {
+              toolUseId: toolUse.toolUseId,
+              content: [{ text: JSON.stringify(result) }],
+              status: hasError ? "error" : "success",
+            },
+          });
+        }
+
+        // Append tool results as a user message and loop
+        messages.push({ role: "user", content: toolResultContents });
+        continue;
+      }
+
+      // Any other stop reason — extract whatever text we have
+      const textBlock = assistantMessage?.content?.find((b: { text?: string }) => b.text);
+      if (textBlock?.text) finalReply = textBlock.text.trim();
+      break;
+    }
+
+    return NextResponse.json({ reply: finalReply });
   } catch (err: unknown) {
     console.error("[chat] Bedrock error:", err);
     const msg = (err as { message?: string })?.message ?? "AI assistant unavailable.";

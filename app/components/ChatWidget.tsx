@@ -1,21 +1,22 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Message = { role: "user" | "assistant"; text: string };
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", text: "Hi! I'm your AirApp flight assistant. Ask me about flights, routes, or booking help." },
+    { role: "assistant", text: "Hi! I'm your AirApp flight assistant. I can search flights, check seat availability, and book seats for you. What can I help you with?" },
   ]);
+  const [history, setHistory] = useState<{ role: string; content: string }[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, open]);
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -24,14 +25,22 @@ export default function ChatWidget() {
     setInput("");
     setMessages((prev) => [...prev, { role: "user", text }]);
     setLoading(true);
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, history }),
       });
       const data = await res.json();
-      setMessages((prev) => [...prev, { role: "assistant", text: data.reply }]);
+      const reply = data.reply ?? "Sorry, something went wrong.";
+      setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
+      // Update conversation history for next turn
+      setHistory((prev) => [
+        ...prev,
+        { role: "user", content: text },
+        { role: "assistant", content: reply },
+      ]);
     } catch {
       setMessages((prev) => [...prev, { role: "assistant", text: "Sorry, something went wrong. Please try again." }]);
     } finally {
@@ -58,7 +67,7 @@ export default function ChatWidget() {
             <span className="text-white text-lg">✈</span>
             <div>
               <p className="text-white font-semibold text-sm">AirApp Assistant</p>
-              <p className="text-blue-200 text-xs">Powered by Amazon Nova</p>
+              <p className="text-blue-200 text-xs">Powered by Amazon Nova · Can search & book flights</p>
             </div>
           </div>
 
@@ -66,7 +75,7 @@ export default function ChatWidget() {
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 max-h-80">
             {messages.map((m, i) => (
               <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm ${
+                <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap ${
                   m.role === "user"
                     ? "bg-blue-600 text-white"
                     : "bg-gray-100 text-gray-800"
@@ -77,8 +86,11 @@ export default function ChatWidget() {
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-gray-100 rounded-xl px-3 py-2 text-sm text-gray-500">
-                  <span className="animate-pulse">Thinking...</span>
+                <div className="bg-gray-100 rounded-xl px-3 py-2 text-sm text-gray-500 flex items-center gap-1">
+                  <span className="animate-pulse">Thinking</span>
+                  <span className="animate-bounce delay-75">.</span>
+                  <span className="animate-bounce delay-150">.</span>
+                  <span className="animate-bounce delay-300">.</span>
                 </div>
               </div>
             )}
@@ -91,13 +103,14 @@ export default function ChatWidget() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about flights..."
-              className="flex-1 border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              disabled={loading}
+              placeholder={loading ? "Waiting for response..." : "Ask about flights or book a seat..."}
+              className="flex-1 border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-gray-50 disabled:text-gray-400"
             />
             <button
               type="submit"
               disabled={loading || !input.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-3 py-2 rounded-lg transition"
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-3 py-2 rounded-lg transition"
             >
               Send
             </button>
