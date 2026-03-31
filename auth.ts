@@ -14,17 +14,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         try {
           const { getUserByEmail } = await import("@/lib/db");
           const user = await getUserByEmail(credentials.email as string);
-          console.log("[auth] lookup email:", credentials.email, "found:", !!user);
           if (!user) return null;
           const valid = await bcrypt.compare(
             credentials.password as string,
             user.passwordHash
           );
-          console.log("[auth] password valid:", valid);
           if (!valid) return null;
           return { id: user.id, name: user.name, email: user.email };
         } catch (err) {
-          console.error("[auth] authorize error:", JSON.stringify(err, Object.getOwnPropertyNames(err)));
+          console.error("[auth] authorize error:", err);
           return null;
         }
       },
