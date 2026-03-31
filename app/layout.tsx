@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
-import { auth } from "@/auth";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -19,12 +18,21 @@ export const metadata: Metadata = {
   description: "Flight search, booking and management",
 };
 
+async function getSession() {
+  try {
+    const { auth } = await import("@/auth");
+    return await auth();
+  } catch {
+    return null;
+  }
+}
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await auth().catch(() => null);
+  const session = await getSession();
 
   return (
     <html
