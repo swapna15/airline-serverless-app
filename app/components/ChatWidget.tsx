@@ -127,6 +127,9 @@ export default function ChatWidget() {
                       <span className="text-gray-700">{quota.quota.tokensPerMinute.toLocaleString()} tok/min</span>
                     </div>
                   )}
+                  {(quota as {note?: string}).note && (
+                    <p className="text-amber-600 mt-1">{(quota as {note?: string}).note}</p>
+                  )}
                   <button onClick={fetchQuota} className="text-blue-500 hover:underline text-right mt-1">Refresh</button>
                 </div>
               )}

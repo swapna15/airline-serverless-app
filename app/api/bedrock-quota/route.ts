@@ -5,11 +5,33 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const region = process.env.BEDROCK_REGION || "us-east-1";
-const modelId = "us.anthropic.claude-sonnet-4-6";
 
-// Service Quotas quota code for Claude Sonnet cross-region tokens per minute
-// L-* codes vary by model — we fetch the applied quota value
-const QUOTA_CODE = "L-8F4B0A0E"; // Claude Sonnet cross-region tokens per minute
+// Try both the cross-region profile ID and the base model ID
+const MODEL_IDS = [
+  "us.anthropic.claude-sonnet-4-6",
+  "anthropic.claude-sonnet-4-6",
+];
+
+const QUOTA_CODE = "L-8F4B0A0E";
+
+async function getTokenMetric(cwClient: CloudWatchClient, metricName: string, startTime: Date, endTime: Date) {
+  let total = 0;
+  for (const modelId of MODEL_IDS) {
+    try {
+      const result = await cwClient.send(new GetMetricStatisticsCommand({
+        Namespace: "AWS/Bedrock",
+        MetricName: metricName,
+        Dimensions: [{ Name: "ModelId", Value: modelId }],
+        StartTime: startTime,
+        EndTime: endTime,
+        Period: 86400,
+        Statistics: ["Sum"],
+      }));
+      total += result.Datapoints?.[0]?.Sum ?? 0;
+    } catch { /* skip */ }
+  }
+  return total;
+}
 
 export async function GET() {
   try {
@@ -20,46 +42,19 @@ export async function GET() {
     const startOfDay = new Date(now);
     startOfDay.setUTCHours(0, 0, 0, 0);
 
-    // Get token usage from CloudWatch for today
-    const [inputMetric, outputMetric, quotaResult] = await Promise.allSettled([
-      cwClient.send(new GetMetricStatisticsCommand({
-        Namespace: "AWS/Bedrock",
-        MetricName: "InputTokenCount",
-        Dimensions: [{ Name: "ModelId", Value: modelId }],
-        StartTime: startOfDay,
-        EndTime: now,
-        Period: 86400, // 1 day in seconds
-        Statistics: ["Sum"],
-      })),
-      cwClient.send(new GetMetricStatisticsCommand({
-        Namespace: "AWS/Bedrock",
-        MetricName: "OutputTokenCount",
-        Dimensions: [{ Name: "ModelId", Value: modelId }],
-        StartTime: startOfDay,
-        EndTime: now,
-        Period: 86400,
-        Statistics: ["Sum"],
-      })),
+    const [inputTokens, outputTokens, quotaResult] = await Promise.all([
+      getTokenMetric(cwClient, "InputTokenCount", startOfDay, now),
+      getTokenMetric(cwClient, "OutputTokenCount", startOfDay, now),
       sqClient.send(new GetServiceQuotaCommand({
         ServiceCode: "bedrock",
         QuotaCode: QUOTA_CODE,
-      })),
+      })).catch(() => null),
     ]);
 
-    const inputTokens = inputMetric.status === "fulfilled"
-      ? (inputMetric.value.Datapoints?.[0]?.Sum ?? 0)
-      : 0;
-
-    const outputTokens = outputMetric.status === "fulfilled"
-      ? (outputMetric.value.Datapoints?.[0]?.Sum ?? 0)
-      : 0;
-
-    const quotaValue = quotaResult.status === "fulfilled"
-      ? quotaResult.value.Quota?.Value ?? null
-      : null;
+    const quotaValue = quotaResult?.Quota?.Value ?? null;
 
     return NextResponse.json({
-      model: modelId,
+      model: MODEL_IDS[0],
       today: {
         inputTokens: Math.round(inputTokens),
         outputTokens: Math.round(outputTokens),
@@ -69,6 +64,7 @@ export async function GET() {
         tokensPerMinute: quotaValue,
         unit: "tokens/minute",
       },
+      note: inputTokens === 0 ? "CloudWatch metrics have a ~15 min delay. Values may be 0 if usage was recent." : null,
       resetAt: new Date(startOfDay.getTime() + 86400000).toISOString(),
     });
   } catch (err) {
