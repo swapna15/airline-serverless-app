@@ -4,6 +4,7 @@ import {
 } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
+  DeleteCommand,
   GetCommand,
   PutCommand,
   QueryCommand,
@@ -12,17 +13,21 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
-import { Booking, BookingPassenger, Flight, Seat, SeatStatus, User } from "@/lib/types";
+import { Booking, BookingPassenger, Flight, LoyaltyTransaction, NotificationLog, PriceAlert, RebookingHistory, Seat, SeatStatus, User } from "@/lib/types";
 
 const region = process.env.AWS_REGION || "us-east-2";
 const flightsTable = process.env.DDB_FLIGHTS_TABLE || "airline-flights";
 const seatsTable = process.env.DDB_SEATS_TABLE || "airline-seats";
 const bookingsTable = process.env.DDB_BOOKINGS_TABLE || "airline-bookings";
 const usersTable = process.env.DDB_USERS_TABLE || "airline-users";
+const priceAlertsTable = process.env.DDB_PRICE_ALERTS_TABLE || 'airline-price-alerts';
+const rebookingHistoryTable = process.env.DDB_REBOOKING_HISTORY_TABLE || 'airline-rebooking-history';
+const loyaltyTransactionsTable = process.env.DDB_LOYALTY_TRANSACTIONS_TABLE || 'airline-loyalty-transactions';
+const notificationLogTable = process.env.DDB_NOTIFICATION_LOG_TABLE || 'airline-notification-log';
 const flightsRouteDateIndex = "route-date-index";
 
 const client = new DynamoDBClient({ region });
-const docClient = DynamoDBDocumentClient.from(client);
+export const docClient = DynamoDBDocumentClient.from(client);
 
 const rowLabels = ["A", "B", "C", "D", "E", "F"];
 let seedAttempted = false;
@@ -34,7 +39,7 @@ const seedFlights: Flight[] = [
     id: "FL-1001",
     from: "ORD",
     to: "JFK",
-    date: "2026-04-10",
+    date: "2026-06-15",
     departureTime: "08:30",
     arrivalTime: "11:20",
     price: 220,
@@ -45,7 +50,7 @@ const seedFlights: Flight[] = [
     id: "FL-1002",
     from: "SFO",
     to: "LAX",
-    date: "2026-04-10",
+    date: "2026-06-15",
     departureTime: "09:00",
     arrivalTime: "10:35",
     price: 140,
@@ -56,10 +61,32 @@ const seedFlights: Flight[] = [
     id: "FL-1003",
     from: "SEA",
     to: "DEN",
-    date: "2026-04-11",
+    date: "2026-06-16",
     departureTime: "14:15",
     arrivalTime: "17:05",
     price: 180,
+    totalSeats: 24,
+    availableSeats: 24,
+  },
+  {
+    id: "FL-1004",
+    from: "ORD",
+    to: "LAX",
+    date: "2026-06-15",
+    departureTime: "11:00",
+    arrivalTime: "13:45",
+    price: 195,
+    totalSeats: 24,
+    availableSeats: 24,
+  },
+  {
+    id: "FL-1005",
+    from: "JFK",
+    to: "ORD",
+    date: "2026-06-17",
+    departureTime: "07:00",
+    arrivalTime: "09:50",
+    price: 210,
     totalSeats: 24,
     availableSeats: 24,
   },
@@ -248,6 +275,7 @@ export async function createBooking(data: {
     })),
     status: "confirmed",
     createdAt: new Date().toISOString(),
+    autoRebook: false,
   };
 
   try {
@@ -523,5 +551,345 @@ export async function verifyTables() {
       return false;
     }
     return false;
+  }
+}
+
+// ── Price Alerts ─────────────────────────────────────────────────────────────
+
+export async function getPriceAlertsByUserId(userId: string): Promise<PriceAlert[]> {
+  try {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: priceAlertsTable,
+        KeyConditionExpression: "userId = :userId",
+        ExpressionAttributeValues: { ":userId": userId },
+      })
+    );
+    return (result.Items ?? []) as PriceAlert[];
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") return [];
+    throw err;
+  }
+}
+
+export async function getPriceAlertsByRouteKey(routeKey: string): Promise<PriceAlert[]> {
+  try {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: priceAlertsTable,
+        IndexName: "routeKey-index",
+        KeyConditionExpression: "routeKey = :routeKey",
+        ExpressionAttributeValues: { ":routeKey": routeKey },
+      })
+    );
+    return (result.Items ?? []) as PriceAlert[];
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") return [];
+    throw err;
+  }
+}
+
+export async function createPriceAlert(
+  data: Omit<PriceAlert, "alertId" | "createdAt">
+): Promise<PriceAlert> {
+  const alert: PriceAlert = {
+    ...data,
+    alertId: randomUUID(),
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    await docClient.send(
+      new PutCommand({ TableName: priceAlertsTable, Item: alert })
+    );
+    return alert;
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+      throw new Error(`Table not found: ${priceAlertsTable}`);
+    }
+    throw err;
+  }
+}
+
+export async function updatePriceAlert(
+  userId: string,
+  alertId: string,
+  updates: Partial<PriceAlert>
+): Promise<PriceAlert | undefined> {
+  const entries = Object.entries(updates).filter(
+    ([k]) => k !== "userId" && k !== "alertId"
+  );
+  if (entries.length === 0) {
+    const result = await docClient.send(
+      new GetCommand({ TableName: priceAlertsTable, Key: { userId, alertId } })
+    );
+    return result.Item as PriceAlert | undefined;
+  }
+
+  const setExpr = entries.map(([k], i) => `#f${i} = :v${i}`).join(", ");
+  const names = Object.fromEntries(entries.map(([k], i) => [`#f${i}`, k]));
+  const values = Object.fromEntries(entries.map(([, v], i) => [`:v${i}`, v]));
+
+  try {
+    const result = await docClient.send(
+      new UpdateCommand({
+        TableName: priceAlertsTable,
+        Key: { userId, alertId },
+        UpdateExpression: `SET ${setExpr}`,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    return result.Attributes as PriceAlert | undefined;
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+      throw new Error(`Table not found: ${priceAlertsTable}`);
+    }
+    throw err;
+  }
+}
+
+export async function deletePriceAlert(userId: string, alertId: string): Promise<void> {
+  try {
+    await docClient.send(
+      new DeleteCommand({ TableName: priceAlertsTable, Key: { userId, alertId } })
+    );
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+      throw new Error(`Table not found: ${priceAlertsTable}`);
+    }
+    throw err;
+  }
+}
+
+// ── Rebooking History ─────────────────────────────────────────────────────────
+
+export async function createRebookingHistory(
+  data: Omit<RebookingHistory, "timestamp">
+): Promise<RebookingHistory> {
+  const record: RebookingHistory = {
+    ...data,
+    timestamp: new Date().toISOString(),
+  };
+  try {
+    await docClient.send(
+      new PutCommand({ TableName: rebookingHistoryTable, Item: record })
+    );
+    return record;
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+      throw new Error(`Table not found: ${rebookingHistoryTable}`);
+    }
+    throw err;
+  }
+}
+
+export async function getRebookingHistoryByUserId(userId: string): Promise<RebookingHistory[]> {
+  try {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: rebookingHistoryTable,
+        KeyConditionExpression: "userId = :userId",
+        ExpressionAttributeValues: { ":userId": userId },
+      })
+    );
+    return (result.Items ?? []) as RebookingHistory[];
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") return [];
+    throw err;
+  }
+}
+
+// ── Loyalty Transactions ──────────────────────────────────────────────────────
+
+export async function createLoyaltyTransaction(
+  data: Omit<LoyaltyTransaction, "transactionId" | "timestamp">
+): Promise<LoyaltyTransaction> {
+  const tx: LoyaltyTransaction = {
+    ...data,
+    transactionId: randomUUID(),
+    timestamp: new Date().toISOString(),
+  };
+  try {
+    await docClient.send(
+      new PutCommand({ TableName: loyaltyTransactionsTable, Item: tx })
+    );
+    return tx;
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+      throw new Error(`Table not found: ${loyaltyTransactionsTable}`);
+    }
+    throw err;
+  }
+}
+
+export async function getLoyaltyTransactionsByUserId(userId: string): Promise<LoyaltyTransaction[]> {
+  try {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: loyaltyTransactionsTable,
+        KeyConditionExpression: "userId = :userId",
+        ExpressionAttributeValues: { ":userId": userId },
+      })
+    );
+    return (result.Items ?? []) as LoyaltyTransaction[];
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") return [];
+    throw err;
+  }
+}
+
+export async function updateUserLoyaltyPoints(userId: string, pointsDelta: number): Promise<number> {
+  try {
+    const result = await docClient.send(
+      new UpdateCommand({
+        TableName: usersTable,
+        Key: { id: userId },
+        UpdateExpression:
+          "SET loyaltyPoints = if_not_exists(loyaltyPoints, :zero) + :delta",
+        ExpressionAttributeValues: { ":zero": 0, ":delta": pointsDelta },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+    const newBalance = (result.Attributes?.loyaltyPoints as number) ?? 0;
+    if (newBalance < 0) {
+      // Clamp to 0
+      await docClient.send(
+        new UpdateCommand({
+          TableName: usersTable,
+          Key: { id: userId },
+          UpdateExpression: "SET loyaltyPoints = :zero",
+          ExpressionAttributeValues: { ":zero": 0 },
+        })
+      );
+      return 0;
+    }
+    return newBalance;
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+      throw new Error(`Table not found: ${usersTable}`);
+    }
+    throw err;
+  }
+}
+
+// ── Notification Log ──────────────────────────────────────────────────────────
+
+export async function createNotificationLog(
+  data: Omit<NotificationLog, "notificationId">
+): Promise<NotificationLog> {
+  const log: NotificationLog = {
+    ...data,
+    notificationId: randomUUID(),
+  };
+  try {
+    await docClient.send(
+      new PutCommand({ TableName: notificationLogTable, Item: log })
+    );
+    return log;
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+      throw new Error(`Table not found: ${notificationLogTable}`);
+    }
+    throw err;
+  }
+}
+
+export async function getUnreadNotificationsByUserId(userId: string): Promise<NotificationLog[]> {
+  try {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: notificationLogTable,
+        KeyConditionExpression: "userId = :userId",
+        FilterExpression: "#read = :false OR attribute_not_exists(#read)",
+        ExpressionAttributeNames: { "#read": "read" },
+        ExpressionAttributeValues: { ":userId": userId, ":false": false },
+      })
+    );
+    return (result.Items ?? []) as NotificationLog[];
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") return [];
+    throw err;
+  }
+}
+
+export async function markNotificationRead(userId: string, notificationId: string): Promise<void> {
+  try {
+    await docClient.send(
+      new UpdateCommand({
+        TableName: notificationLogTable,
+        Key: { userId, notificationId },
+        UpdateExpression: "SET #read = :true",
+        ExpressionAttributeNames: { "#read": "read" },
+        ExpressionAttributeValues: { ":true": true },
+      })
+    );
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+      throw new Error(`Table not found: ${notificationLogTable}`);
+    }
+    throw err;
+  }
+}
+
+// ── Google SSO upsert ─────────────────────────────────────────────────────────
+
+export async function upsertUserFromGoogle(data: {
+  name: string;
+  email: string;
+  googleId: string;
+  pictureUrl: string;
+}): Promise<{ user: User; isNew: boolean }> {
+  const existing = await getUserByEmail(data.email);
+
+  if (existing) {
+    try {
+      const result = await docClient.send(
+        new UpdateCommand({
+          TableName: usersTable,
+          Key: { id: existing.id },
+          UpdateExpression: "SET googleId = :googleId, pictureUrl = :pictureUrl",
+          ExpressionAttributeValues: {
+            ":googleId": data.googleId,
+            ":pictureUrl": data.pictureUrl,
+          },
+          ReturnValues: "ALL_NEW",
+        })
+      );
+      return { user: result.Attributes as User, isNew: false };
+    } catch (err: unknown) {
+      if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+        throw new Error(`Table not found: ${usersTable}`);
+      }
+      throw err;
+    }
+  }
+
+  const user: User = {
+    id: randomUUID(),
+    name: data.name.trim(),
+    email: data.email.trim().toLowerCase(),
+    passwordHash: null,
+    createdAt: new Date().toISOString(),
+    googleId: data.googleId,
+    pictureUrl: data.pictureUrl,
+    loyaltyPoints: 0,
+    notificationPreferences: { inApp: true, email: false },
+  };
+
+  try {
+    await docClient.send(
+      new PutCommand({
+        TableName: usersTable,
+        Item: user,
+        ConditionExpression: "attribute_not_exists(id)",
+      })
+    );
+    return { user, isNew: true };
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "ResourceNotFoundException") {
+      throw new Error(`Table not found: ${usersTable}`);
+    }
+    throw err;
   }
 }

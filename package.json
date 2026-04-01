@@ -6,23 +6,24 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest --run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1021.0",
     "@aws-sdk/client-cloudwatch": "^3.1021.0",
     "@aws-sdk/client-dynamodb": "^3.1020.0",
+    "@aws-sdk/client-lambda": "^3.1021.0",
     "@aws-sdk/client-secrets-manager": "^3.1021.0",
     "@aws-sdk/client-service-quotas": "^3.1021.0",
     "@aws-sdk/lib-dynamodb": "^3.1020.0",
-    "@types/bcryptjs": "^2.4.6",
     "axios": "^1.14.0",
     "bcryptjs": "^3.0.3",
     "next": "16.2.1",
     "next-auth": "^5.0.0-beta.29",
     "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "swr": "^2.4.1"
+    "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -31,7 +32,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
+    "fast-check": "^4.6.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.2"
   }
 }

@@ -10,8 +10,25 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const bedrockRegion = process.env.BEDROCK_REGION || "us-east-1";
-const modelId = "us.amazon.nova-micro-v1:0";
+// Primary model uses cross-region inference profile; fallbacks used when quota is exhausted
+const MODEL_FALLBACK_CHAIN = [
+  process.env.BEDROCK_MODEL_ID || "us.amazon.nova-micro-v1:0",
+  "us.amazon.nova-lite-v1:0",
+  "amazon.nova-micro-v1:0", // single-region fallback
+];
 const MAX_ITERATIONS = 10;
+
+function isQuotaError(err: unknown): boolean {
+  const msg = (err as { message?: string; name?: string })?.message ?? "";
+  const name = (err as { name?: string })?.name ?? "";
+  return (
+    name === "ThrottlingException" ||
+    msg.includes("ThrottlingException") ||
+    msg.includes("Too many requests") ||
+    msg.includes("quota") ||
+    msg.includes("rate exceeded")
+  );
+}
 
 async function getBedrockClient() {
   try {
@@ -74,20 +91,36 @@ Rules: confirm booking details before calling create_booking. If user wants to b
     const client = await getBedrockClient();
     let iterations = 0;
     let finalReply = "Sorry, I couldn't generate a response.";
+    let activeModelId = MODEL_FALLBACK_CHAIN[0];
 
     // Agentic loop
     while (iterations < MAX_ITERATIONS) {
       iterations++;
 
       const command = new ConverseCommand({
-        modelId,
+        modelId: activeModelId,
         system: [{ text: systemPrompt }],
         messages,
         toolConfig,
         inferenceConfig: { maxTokens: 512, temperature: 0.7 },
       });
 
-      const response = await client.send(command);
+      let response;
+      for (let mi = 0; mi < MODEL_FALLBACK_CHAIN.length; mi++) {
+        try {
+          activeModelId = MODEL_FALLBACK_CHAIN[mi];
+          const cmd = mi === 0 ? command : new ConverseCommand({ ...command.input, modelId: activeModelId });
+          response = await client.send(cmd);
+          break;
+        } catch (modelErr) {
+          if (isQuotaError(modelErr) && mi < MODEL_FALLBACK_CHAIN.length - 1) {
+            console.warn(`[chat] Quota exceeded for ${activeModelId}, trying fallback...`);
+            continue;
+          }
+          throw modelErr;
+        }
+      }
+      if (!response) throw new Error("All models exhausted.");
       const assistantMessage = response.output?.message;
       if (assistantMessage) messages.push(assistantMessage);
 

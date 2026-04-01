@@ -27,6 +27,13 @@ export type BookingPassenger = {
   passengerEmail: string;
 };
 
+export type AncillaryItem = {
+  type: string;
+  name: string;
+  price: number;
+  addedAt: string;
+};
+
 export type Booking = {
   id: string;
   flightId: string;
@@ -38,12 +45,59 @@ export type Booking = {
   passengerName?: string;
   passengerEmail?: string;
   seatNumber?: string;
+  autoRebook?: boolean;
+  ancillaries?: AncillaryItem[];
+  refund?: { amount: number; timestamp: string; reference: string };
+  manualReview?: boolean;
 };
 
 export type User = {
   id: string;
   name: string;
   email: string;
-  passwordHash: string;
+  passwordHash: string | null;
   createdAt: string;
+  googleId?: string;
+  pictureUrl?: string;
+  loyaltyPoints?: number;
+  notificationPreferences?: { inApp: boolean; email: boolean };
+};
+
+export type PriceAlert = {
+  userId: string;
+  alertId: string;
+  routeKey: string; // "ORD#JFK" — GSI PK
+  departureDate?: string;
+  threshold: number; // USD
+  createdAt: string;
+  lastCheckedAt?: string;
+  status: "active" | "triggered" | "expired";
+};
+
+export type RebookingHistory = {
+  userId: string;
+  timestamp: string;
+  originalBookingId: string;
+  newBookingId: string;
+  fareSaved: number;
+  trigger: "auto" | "manual" | "disruption";
+};
+
+export type LoyaltyTransaction = {
+  userId: string;
+  transactionId: string;
+  type: "booking" | "ancillary" | "rebooking_saving" | "cancellation";
+  points: number;
+  referenceId: string;
+  timestamp: string;
+};
+
+export type NotificationLog = {
+  userId: string;
+  notificationId: string;
+  channel: "inApp" | "email";
+  message: string;
+  sentAt: string;
+  status: "sent" | "suppressed" | "failed";
+  read?: boolean;
 };

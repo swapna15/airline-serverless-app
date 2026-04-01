@@ -283,7 +283,7 @@ resource "aws_lambda_function" "search_flights" {
   source_code_hash = data.archive_file.search_flights_zip.output_base64sha256
   role             = aws_iam_role.lambda_exec.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "nodejs22.x"
   timeout          = 10
 
   environment {
@@ -307,7 +307,7 @@ resource "aws_lambda_function" "flight_seats" {
   source_code_hash = data.archive_file.flight_seats_zip.output_base64sha256
   role             = aws_iam_role.lambda_exec.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "nodejs22.x"
   timeout          = 10
 
   environment {
@@ -331,7 +331,7 @@ resource "aws_lambda_function" "create_booking" {
   source_code_hash = data.archive_file.create_booking_zip.output_base64sha256
   role             = aws_iam_role.lambda_exec.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "nodejs22.x"
   timeout          = 10
 
   environment {
@@ -355,7 +355,7 @@ resource "aws_lambda_function" "get_booking" {
   source_code_hash = data.archive_file.get_booking_zip.output_base64sha256
   role             = aws_iam_role.lambda_exec.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "nodejs22.x"
   timeout          = 10
 
   environment {
@@ -379,7 +379,7 @@ resource "aws_lambda_function" "manage_flight" {
   source_code_hash = data.archive_file.manage_flight_zip.output_base64sha256
   role             = aws_iam_role.lambda_exec.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "nodejs22.x"
   timeout          = 10
 
   environment {
@@ -531,9 +531,8 @@ output "api_gateway_url" {
 
 # ── Bedrock Flight Assistant ─────────────────────────────────────────────────
 
-resource "aws_secretsmanager_secret" "bedrock_config" {
-  name        = "airline/bedrock-config"
-  description = "AWS credentials and config for Bedrock inference"
+locals {
+  bedrock_secret_arn = "arn:aws:secretsmanager:us-east-2:389009238809:secret:airline/bedrock-config-meCxZT"
 }
 
 resource "aws_iam_role_policy" "lambda_bedrock" {
@@ -551,7 +550,7 @@ resource "aws_iam_role_policy" "lambda_bedrock" {
       {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
-        Resource = aws_secretsmanager_secret.bedrock_config.arn
+        Resource = local.bedrock_secret_arn
       }
     ]
   })
@@ -575,7 +574,7 @@ resource "aws_lambda_function" "flight_assistant" {
   source_code_hash = data.archive_file.flight_assistant_zip.output_base64sha256
   role             = aws_iam_role.lambda_exec.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "nodejs22.x"
   timeout          = 30
 
   environment {
@@ -609,4 +608,425 @@ resource "aws_lambda_permission" "allow_apigw_flight_assistant" {
 
 output "flight_assistant_function_name" {
   value = aws_lambda_function.flight_assistant.function_name
+}
+
+
+# ── Realtime Flight Rebooking: New DynamoDB Tables ───────────────────────────
+
+# airline-price-alerts table
+resource "aws_dynamodb_table" "price_alerts" {
+  name         = "airline-price-alerts"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "userId"
+  range_key    = "alertId"
+
+  attribute {
+    name = "userId"
+    type = "S"
+  }
+  attribute {
+    name = "alertId"
+    type = "S"
+  }
+  attribute {
+    name = "routeKey"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "routeKey-index"
+    hash_key        = "routeKey"
+    projection_type = "ALL"
+  }
+}
+
+# airline-rebooking-history table
+resource "aws_dynamodb_table" "rebooking_history" {
+  name         = "airline-rebooking-history"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "userId"
+  range_key    = "timestamp"
+
+  attribute {
+    name = "userId"
+    type = "S"
+  }
+  attribute {
+    name = "timestamp"
+    type = "S"
+  }
+}
+
+# airline-loyalty-transactions table
+resource "aws_dynamodb_table" "loyalty_transactions" {
+  name         = "airline-loyalty-transactions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "userId"
+  range_key    = "transactionId"
+
+  attribute {
+    name = "userId"
+    type = "S"
+  }
+  attribute {
+    name = "transactionId"
+    type = "S"
+  }
+}
+
+# airline-notification-log table
+resource "aws_dynamodb_table" "notification_log" {
+  name         = "airline-notification-log"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "userId"
+  range_key    = "notificationId"
+
+  attribute {
+    name = "userId"
+    type = "S"
+  }
+  attribute {
+    name = "notificationId"
+    type = "S"
+  }
+}
+
+# ── Realtime Flight Rebooking: Extended IAM Policy ───────────────────────────
+
+resource "aws_iam_role_policy" "lambda_dynamodb_rebooking" {
+  name = "airline-lambda-dynamodb-rebooking-access"
+  role = aws_iam_role.lambda_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:TransactWriteItems"
+        ]
+        Resource = [
+          aws_dynamodb_table.price_alerts.arn,
+          "${aws_dynamodb_table.price_alerts.arn}/index/*",
+          aws_dynamodb_table.rebooking_history.arn,
+          aws_dynamodb_table.loyalty_transactions.arn,
+          aws_dynamodb_table.notification_log.arn
+        ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# ── Realtime Flight Rebooking: New Lambda Functions ──────────────────────────
+
+data "archive_file" "fare_monitor_zip" {
+  type        = "zip"
+  source_dir  = "../../lambdas/fare-monitor"
+  output_path = "${path.module}/fare-monitor.zip"
+}
+
+resource "aws_lambda_function" "fare_monitor" {
+  function_name    = "airline-fare-monitor"
+  filename         = data.archive_file.fare_monitor_zip.output_path
+  source_code_hash = data.archive_file.fare_monitor_zip.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  timeout          = 60
+
+  environment {
+    variables = {
+      FLIGHTS_TABLE      = aws_dynamodb_table.flights.name
+      PRICE_ALERTS_TABLE = aws_dynamodb_table.price_alerts.name
+      REBOOKING_TABLE    = aws_dynamodb_table.rebooking_history.name
+    }
+  }
+}
+
+data "archive_file" "disruption_detector_zip" {
+  type        = "zip"
+  source_dir  = "../../lambdas/disruption-detector"
+  output_path = "${path.module}/disruption-detector.zip"
+}
+
+resource "aws_lambda_function" "disruption_detector" {
+  function_name    = "airline-disruption-detector"
+  filename         = data.archive_file.disruption_detector_zip.output_path
+  source_code_hash = data.archive_file.disruption_detector_zip.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  timeout          = 60
+
+  environment {
+    variables = {
+      FLIGHTS_TABLE   = aws_dynamodb_table.flights.name
+      BOOKINGS_TABLE  = aws_dynamodb_table.bookings.name
+      REBOOKING_TABLE = aws_dynamodb_table.rebooking_history.name
+    }
+  }
+}
+
+data "archive_file" "rebooking_engine_zip" {
+  type        = "zip"
+  source_dir  = "../../lambdas/rebooking-engine"
+  output_path = "${path.module}/rebooking-engine.zip"
+}
+
+resource "aws_lambda_function" "rebooking_engine" {
+  function_name    = "airline-rebooking-engine"
+  filename         = data.archive_file.rebooking_engine_zip.output_path
+  source_code_hash = data.archive_file.rebooking_engine_zip.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  timeout          = 60
+
+  environment {
+    variables = {
+      FLIGHTS_TABLE      = aws_dynamodb_table.flights.name
+      BOOKINGS_TABLE     = aws_dynamodb_table.bookings.name
+      REBOOKING_TABLE    = aws_dynamodb_table.rebooking_history.name
+      LOYALTY_TABLE      = aws_dynamodb_table.loyalty_transactions.name
+    }
+  }
+}
+
+data "archive_file" "notification_worker_zip" {
+  type        = "zip"
+  source_dir  = "../../lambdas/notification-worker"
+  output_path = "${path.module}/notification-worker.zip"
+}
+
+resource "aws_lambda_function" "notification_worker" {
+  function_name    = "airline-notification-worker"
+  filename         = data.archive_file.notification_worker_zip.output_path
+  source_code_hash = data.archive_file.notification_worker_zip.output_base64sha256
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  timeout          = 60
+
+  environment {
+    variables = {
+      NOTIFICATION_LOG_TABLE = aws_dynamodb_table.notification_log.name
+    }
+  }
+}
+
+# ── Realtime Flight Rebooking: SQS DLQs ─────────────────────────────────────
+
+resource "aws_sqs_queue" "fare_monitor_dlq" {
+  name = "fare-monitor-dlq"
+}
+
+resource "aws_sqs_queue" "disruption_detector_dlq" {
+  name = "disruption-detector-dlq"
+}
+
+# ── Realtime Flight Rebooking: EventBridge Scheduler ────────────────────────
+
+resource "aws_iam_role" "scheduler_role" {
+  name = "airline-scheduler-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "scheduler.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "scheduler_lambda_invoke" {
+  name = "scheduler-lambda-invoke"
+  role = aws_iam_role.scheduler_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "lambda:InvokeFunction"
+      Resource = [
+        aws_lambda_function.fare_monitor.arn,
+        aws_lambda_function.disruption_detector.arn
+      ]
+    }]
+  })
+}
+
+# EventBridge Scheduler for fare-monitor (every 15 minutes)
+resource "aws_scheduler_schedule" "fare_monitor" {
+  name = "fare-monitor-schedule"
+  flexible_time_window { mode = "OFF" }
+  schedule_expression = "rate(15 minutes)"
+  target {
+    arn      = aws_lambda_function.fare_monitor.arn
+    role_arn = aws_iam_role.scheduler_role.arn
+  }
+}
+
+# EventBridge Scheduler for disruption-detector (every 5 minutes)
+resource "aws_scheduler_schedule" "disruption_detector" {
+  name = "disruption-detector-schedule"
+  flexible_time_window { mode = "OFF" }
+  schedule_expression = "rate(5 minutes)"
+  target {
+    arn      = aws_lambda_function.disruption_detector.arn
+    role_arn = aws_iam_role.scheduler_role.arn
+  }
+}
+
+# ── Realtime Flight Rebooking: SNS Alerts Topic ──────────────────────────────
+
+resource "aws_sns_topic" "alerts" {
+  name = "airline-alerts"
+}
+
+# ── Realtime Flight Rebooking: CloudWatch DLQ Alarms ────────────────────────
+
+resource "aws_cloudwatch_metric_alarm" "fare_monitor_dlq_alarm" {
+  alarm_name          = "fare-monitor-dlq-depth"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = {
+    QueueName = aws_sqs_queue.fare_monitor_dlq.name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "disruption_detector_dlq_alarm" {
+  alarm_name          = "disruption-detector-dlq-depth"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = {
+    QueueName = aws_sqs_queue.disruption_detector_dlq.name
+  }
+}
+
+# ── Realtime Flight Rebooking: CloudWatch Dashboard & Error Rate Alarms ──────
+
+resource "aws_cloudwatch_dashboard" "airline_dashboard" {
+  dashboard_name = "airline-monitoring"
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type = "metric"
+        properties = {
+          title  = "Fare Monitor"
+          metrics = [
+            ["FareMonitor", "PollSuccess"],
+            ["FareMonitor", "PollFailure"],
+            ["FareMonitor", "AlertsEvaluated"],
+            ["FareMonitor", "RebookingsTriggered"]
+          ]
+          period = 300
+          stat   = "Sum"
+        }
+      },
+      {
+        type = "metric"
+        properties = {
+          title  = "Disruption Detector"
+          metrics = [
+            ["DisruptionDetector", "PollSuccess"],
+            ["DisruptionDetector", "PollFailure"],
+            ["DisruptionDetector", "FlightsChecked"],
+            ["DisruptionDetector", "DisruptionsDetected"]
+          ]
+          period = 300
+          stat   = "Sum"
+        }
+      }
+    ]
+  })
+}
+
+# Error rate alarm for FareMonitor
+resource "aws_cloudwatch_metric_alarm" "fare_monitor_error_rate" {
+  alarm_name          = "fare-monitor-error-rate"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 5
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  metric_query {
+    id          = "error_rate"
+    expression  = "100 * failures / (successes + failures)"
+    label       = "Error Rate %"
+    return_data = true
+  }
+  metric_query {
+    id = "failures"
+    metric {
+      metric_name = "PollFailure"
+      namespace   = "FareMonitor"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
+  metric_query {
+    id = "successes"
+    metric {
+      metric_name = "PollSuccess"
+      namespace   = "FareMonitor"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
+}
+
+# Error rate alarm for DisruptionDetector
+resource "aws_cloudwatch_metric_alarm" "disruption_detector_error_rate" {
+  alarm_name          = "disruption-detector-error-rate"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 5
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  metric_query {
+    id          = "error_rate"
+    expression  = "100 * failures / (successes + failures)"
+    label       = "Error Rate %"
+    return_data = true
+  }
+  metric_query {
+    id = "failures"
+    metric {
+      metric_name = "PollFailure"
+      namespace   = "DisruptionDetector"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
+  metric_query {
+    id = "successes"
+    metric {
+      metric_name = "PollSuccess"
+      namespace   = "DisruptionDetector"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
 }
