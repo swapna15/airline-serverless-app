@@ -8,8 +8,8 @@ const region = process.env.BEDROCK_REGION || "us-east-1";
 
 // Try both the cross-region profile ID and the base model ID
 const MODEL_IDS = [
-  "us.anthropic.claude-sonnet-4-6",
-  "anthropic.claude-sonnet-4-6",
+  "us.amazon.nova-micro-v1:0",
+  "amazon.nova-micro-v1:0",
 ];
 
 const QUOTA_CODE = "L-8F4B0A0E";
